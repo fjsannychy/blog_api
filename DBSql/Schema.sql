@@ -1,43 +1,32 @@
-
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
 CREATE TABLE [dbo].[Posts](
 	[Id] [int] IDENTITY(1,1) NOT NULL,
 	[Title] [nvarchar](200) NOT NULL,
 	[Description] [nvarchar](max) NOT NULL,
-PRIMARY KEY CLUSTERED 
-(
-	[Id] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
-GO
-/****** Object:  Table [dbo].[Users]    Script Date: 2/21/2026 8:22:58 PM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
+     CONSTRAINT PK_Posts PRIMARY KEY CLUSTERED ([Id] ASC)
+    );
 GO
 CREATE TABLE [dbo].[Users](
-	[Userid] [int] IDENTITY(1,1) NOT NULL,
-	[Username] [nvarchar](100) NOT NULL,
-	[Fullname] [nvarchar](150) NOT NULL,
-	[Password] [nvarchar](255) NOT NULL,
-PRIMARY KEY CLUSTERED 
+    [Userid] INT IDENTITY(1,1) NOT NULL,
+    [Username] NVARCHAR(100) NOT NULL,
+    [Fullname] NVARCHAR(150) NOT NULL,
+    [Password] NVARCHAR(255) NOT NULL,
+
+    CONSTRAINT PK_Users PRIMARY KEY CLUSTERED ([Userid] ASC)
+);
+GO
+CREATE TABLE [dbo].[RefreshToken]
 (
-	[Userid] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
-) ON [PRIMARY]
-GO
-SET IDENTITY_INSERT [dbo].[Posts] ON 
-GO
-INSERT [dbo].[Posts] ([Id], [Title], [Description]) VALUES (2, N'aaaa', N'aaaaa')
-GO
-SET IDENTITY_INSERT [dbo].[Posts] OFF
-GO
-SET IDENTITY_INSERT [dbo].[Users] ON 
-GO
-INSERT [dbo].[Users] ([Userid], [Username], [Fullname], [Password]) VALUES (1, N'admin', N'mafia', N'123')
-GO
-SET IDENTITY_INSERT [dbo].[Users] OFF
+    [Token] NVARCHAR(500) NOT NULL,
+    [UserId] INT NOT NULL,
+    [ExpiresAt] DATETIME2(7) NOT NULL,
+    [IsRevoked] BIT NOT NULL CONSTRAINT DF_RefreshToken_IsRevoked DEFAULT (0),
+
+    CONSTRAINT [PK_RefreshToken] 
+        PRIMARY KEY CLUSTERED ([Token] ASC),
+
+    CONSTRAINT [FK_RefreshToken_Users] 
+        FOREIGN KEY ([UserId]) 
+        REFERENCES [dbo].[Users]([UserId])
+        ON DELETE CASCADE
+);
 GO

@@ -1,9 +1,11 @@
 ﻿using Blog.Data;
 using Blog.Models;
 using Dapper;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 namespace Blog.Controllers
 {
+    [Authorize]
     [ApiController]
     [Route("api/[controller]")]
   
@@ -16,6 +18,7 @@ namespace Blog.Controllers
         {
             _context = context;
         }
+
 
         [HttpPost("search")]
         public async Task<IActionResult> GetAll([FromBody] PostFilter filter)

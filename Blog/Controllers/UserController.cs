@@ -1,7 +1,14 @@
-﻿using Dapper;
-using Microsoft.AspNetCore.Mvc;
+﻿using Azure.Core;
 using Blog.Data;  
 using Blog.Models; 
+using Dapper;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Blog.Controllers
 {
@@ -10,10 +17,143 @@ namespace Blog.Controllers
     public class UsersController : ControllerBase
     {
         private readonly DapperContext _context;
+        private readonly IConfiguration _configuration;
 
-        public UsersController(DapperContext context)
+        public UsersController(DapperContext context, IConfiguration configuration)
         {
             _context = context;
+            _configuration = configuration;
+        }
+
+
+        [HttpPost("login")]
+        [AllowAnonymous]
+        public async Task<IActionResult> LoginAsync(LoginRequest request)
+        {
+            using var connection = _context.CreateConnection();
+            var sql = "SELECT userid, username, fullname, password FROM users WHERE username = @Username and password = @Password";
+            var user = await connection.QueryFirstOrDefaultAsync<UsersModel>(sql, 
+                                                 new {
+                                                     Username = request.Username,
+                                                     Password = request.Password,
+                                                 });
+
+            if (user == null)
+                return Unauthorized("Invalid credentials");
+
+            var accessToken = GenerateAccessToken(user);
+            var refreshToken = GenerateRefreshToken(user.Userid);
+
+
+            var insertRefreshTokenSql = @"INSERT INTO RefreshToken (Token, UserId, ExpiresAt,IsRevoked) 
+                                           VALUES (@Token, @UserId, @ExpiresAt, @IsRevoked);";
+
+            await connection.ExecuteScalarAsync(insertRefreshTokenSql, refreshToken);
+
+            return Ok(new
+            {
+                accessToken,
+                refreshToken = refreshToken.Token
+            });
+        }
+
+        private string GenerateAccessToken(UsersModel user)
+        {
+            var jwt = _configuration.GetSection("Jwt");
+
+            var claims = new[]
+            {
+            new Claim(ClaimTypes.Name, user.Username),
+            //new Claim(ClaimTypes.Role, user.Role),
+            new Claim("UserId", user.Userid.ToString())
+            };
+
+            var key = new SymmetricSecurityKey(
+                Encoding.UTF8.GetBytes(jwt["Key"]!)
+            );
+
+            var token = new JwtSecurityToken(
+                issuer: jwt["Issuer"],
+                audience: jwt["Audience"],
+                claims: claims,
+                expires: DateTime.UtcNow.AddMinutes(
+                    int.Parse(jwt["AccessTokenExpiryMinutes"]!)
+                ),
+                signingCredentials: new SigningCredentials(
+                    key, SecurityAlgorithms.HmacSha256)
+            );
+
+            return new JwtSecurityTokenHandler().WriteToken(token);
+        }
+
+        private RefreshToken GenerateRefreshToken(int userId)
+        {
+            var jwt = _configuration.GetSection("Jwt");
+
+            var randomBytes = RandomNumberGenerator.GetBytes(64);
+
+            return new RefreshToken
+            {
+                UserId = userId,
+                Token = Convert.ToBase64String(randomBytes),
+                ExpiresAt = DateTime.UtcNow.AddDays(
+                    int.Parse(jwt["RefreshTokenExpiryDays"]!)
+                ),
+                IsRevoked = false
+            };
+        }
+
+        [HttpPost("refresh")]
+        [AllowAnonymous]
+        public async Task<IActionResult> RefreshAsync(TokenRequest request)
+        {
+
+            using var connection = _context.CreateConnection();
+            var sql = "SELECT * FROM RefreshToken WHERE token = @Token and IsRevoked = 0 and  ExpiresAt > @CurrentUTC ";
+            var storedToken = await connection.QueryFirstOrDefaultAsync<RefreshToken>(sql,
+                                                 new
+                                                 {
+                                                     Token = request.RefreshToken,
+                                                     CurrentUTC = DateTime.UtcNow
+                                                 });
+
+            if (storedToken == null)
+                return Unauthorized("Invalid refresh token");
+
+            var userSql = "SELECT userid, username, fullname, password FROM users WHERE userid = @Userid";
+            var user = await connection.QueryFirstOrDefaultAsync<UsersModel>(userSql, new { Userid = storedToken.UserId });
+            if (user == null)
+                return Unauthorized();
+
+            var deleteRefreshTokenSql = "DELETE FROM RefreshToken WHERE Token = @Token";
+            var affectedRows = await connection.ExecuteAsync(deleteRefreshTokenSql, new { Token = storedToken.Token });
+
+            var newRefreshToken = GenerateRefreshToken(user.Userid);
+
+            var insertRefreshTokenSql = @"INSERT INTO RefreshToken (Token, UserId, ExpiresAt,IsRevoked) 
+                                           VALUES (@Token, @UserId, @ExpiresAt, @IsRevoked);
+                                           SELECT CAST(SCOPE_IDENTITY() AS NVARCHAR(MAX));";
+
+            await connection.ExecuteScalarAsync(insertRefreshTokenSql, newRefreshToken);
+
+            var newAccessToken = GenerateAccessToken(user);
+
+            return Ok(new
+            {
+                accessToken = newAccessToken,
+                refreshToken = newRefreshToken.Token
+            });
+        }
+
+        [HttpPost("logout")]
+        [AllowAnonymous]
+        public async Task<IActionResult> Logout(TokenRequest request)
+        {
+            using var connection = _context.CreateConnection();
+            var deleteRefreshTokenSql = "DELETE FROM RefreshToken WHERE Token = @Token";
+            var affectedRows = await connection.ExecuteAsync(deleteRefreshTokenSql, new { Token = request.RefreshToken });
+
+            return Ok();
         }
 
         // 1. GET ALL USERS: api/users
